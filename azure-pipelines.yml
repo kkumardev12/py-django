@@ -1,0 +1,73 @@
+trigger:
+- main
+
+variables:
+  projectFolder: 'WebAppDjangoWhitenoise'  # <-- Your Django project name
+  port: '8000'
+
+pool:
+  vmImage: ubuntu-latest
+
+strategy:
+  matrix:
+    Python38:
+      PYTHON_VERSION: '3.8'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(PYTHON_VERSION)'
+    architecture: 'x64'
+
+- script: |
+    python -m venv venv
+    source venv/bin/activate
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Set up Python environment and install dependencies'
+
+- script: |
+    source venv/bin/activate
+    python manage.py check --deploy
+  displayName: 'Run Django deployment checks'
+
+- script: |
+    source venv/bin/activate
+    python manage.py migrate
+  displayName: 'Apply migrations'
+
+# ✅ Use dynamic startup command (with variable)
+- script: |
+    echo "{\"appCommandLine\": \"waitress-serve --listen=0.0.0.0:$(port) $(projectFolder).wsgi:application\"}" > deploy.json
+  displayName: 'Create deployment configuration'
+
+# ✅ Zip app excluding venv and cache
+- script: |
+    zip -r djangoapp.zip . -x "*.git*" "venv/*" "__pycache__/*"
+  displayName: 'Zip application'
+
+- script: |
+    mv djangoapp.zip $(Build.ArtifactStagingDirectory)/
+  displayName: 'Move zip to artifact staging directory'
+
+- task: PublishTestResults@2
+  inputs:
+    testResultsFiles: '**/TEST-*.xml'
+    testRunTitle: 'Python $(pythonVersion)'
+  condition: succeededOrFailed()
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+
+# ✅ Final deployment with dynamic startup command
+- task: AzureWebApp@1
+  displayName: 'Deploy Django App to Azure Web App'
+  inputs:
+    azureSubscription: 'Pay-As-You-Go'
+    appType: 'webAppLinux'
+    appName: 'newTestDjangoDemo'
+    package: '$(Build.ArtifactStagingDirectory)/djangoapp.zip'
+    startUpCommand: 'pip install -r /home/site/wwwroot/requirements.txt && waitress-serve --listen=0.0.0.0:$(port) $(projectFolder).wsgi:application'
