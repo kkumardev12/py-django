@@ -1,0 +1,74 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.11'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(pythonVersion)'
+    architecture: 'x64'
+
+- script: |
+    python -m venv venv
+    source venv/bin/activate
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Set up Python environment and install dependencies'
+
+- script: |
+    source venv/bin/activate
+    python manage.py check --deploy
+  displayName: 'Run Django deployment checks'
+
+- script: |
+    source venv/bin/activate
+    python manage.py migrate
+  displayName: 'Apply migrations'
+
+  # Create a startup command file
+- script: |
+    echo "gunicorn --bind=0.0.0.0:8000 helloWebAppDjango.wsgi" > startup.txt
+  displayName: 'Create startup command file'
+
+# Create deployment configuration
+- script: |
+    echo '{"appCommandLine": "gunicorn --bind=0.0.0.0:8000 helloWebAppDjango.wsgi"}' > deploy.json
+  displayName: 'Create deployment configuration'
+
+- script: |
+    zip -r djangoapp.zip . -x "*.git*" "venv/*" "__pycache__/*"
+  displayName: 'Zip application'
+
+- script: |
+    mv djangoapp.zip $(Build.ArtifactStagingDirectory)/
+  displayName: 'Move zip to artifact staging directory'
+
+- task: PublishTestResults@2
+  inputs:
+    testResultsFiles: '**/TEST-*.xml'
+    testRunTitle: 'Python $(pythonVersion)'
+  condition: succeededOrFailed()
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+    
+    
+- task: AzureWebApp@1
+  displayName: 'Deploy Django App to Azure Web App'
+  inputs:
+    azureSubscription: 'Pay-As-You-Go'
+    appType: 'webAppLinux'
+    appName: 'newTestDjangoDemo'
+    package: '$(Build.ArtifactStagingDirectory)/djangoapp.zip'
+    startUpCommand: 'pip install -r /home/site/wwwroot/requirements.txt && gunicorn --bind=0.0.0.0:8000 helloWebAppDjango.wsgi:application'
+
+    runtimeStack: 'PYTHON|3.11'
+    
