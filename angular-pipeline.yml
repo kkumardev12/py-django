@@ -1,0 +1,44 @@
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '20.x'
+  displayName: 'Install Node.js'
+
+- script: |
+    npm install
+    npm install -g @angular/cli
+    npm run build -- --configuration production
+  displayName: 'npm install and build'
+
+# Optional: Check what got built
+- script: |
+    echo "Checking contents of dist/"
+    ls -l dist
+    ls -l dist/angular-project
+  displayName: 'Verify dist folder structure'
+
+# Zip the dist folder
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: 'dist/angular-project'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/angular-app.zip'
+    replaceExistingArchive: true
+  displayName: 'Zip Angular dist folder'
+
+# Publish the zip file
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)/angular-app.zip'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+  displayName: 'Publish zipped artifact'
+  
+
